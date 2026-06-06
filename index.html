@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Emotion Voice Detection</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #0f0f1a;
+      color: #fff;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    h1 {
+      font-size: 2rem;
+      margin-bottom: 8px;
+      background: linear-gradient(90deg, #7c6ff7, #f06292);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .subtitle {
+      color: #888;
+      margin-bottom: 40px;
+      font-size: 0.95rem;
+    }
+
+    .card {
+      background: #1a1a2e;
+      border: 1px solid #2a2a4a;
+      border-radius: 20px;
+      padding: 40px;
+      width: 100%;
+      max-width: 540px;
+      text-align: center;
+    }
+
+    /* Bouton micro */
+    .mic-btn {
+      width: 100px;
+      height: 100px;
+      border-radius: 50%;
+      border: none;
+      background: #7c6ff7;
+      cursor: pointer;
+      font-size: 2.5rem;
+      transition: all 0.3s;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 16px;
+    }
+
+    .mic-btn:hover { background: #6a5de0; transform: scale(1.05); }
+    .mic-btn.recording { background: #e53935; animation: pulse 1s infinite; }
+    .mic-btn:disabled { background: #444; cursor: not-allowed; transform: none; }
+
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(229, 57, 53, 0.4); }
+      50%       { box-shadow: 0 0 0 20px rgba(229, 57, 53, 0); }
+    }
+
+    .status {
+      color: #888;
+      font-size: 0.9rem;
+      margin-bottom: 30px;
+      height: 20px;
+    }
+
+    /* Upload */
+    .upload-zone {
+      border: 2px dashed #2a2a4a;
+      border-radius: 12px;
+      padding: 20px;
+      cursor: pointer;
+      margin-bottom: 30px;
+      transition: border-color 0.3s;
+    }
+    .upload-zone:hover { border-color: #7c6ff7; }
+    .upload-zone input { display: none; }
+    .upload-zone label { cursor: pointer; color: #888; font-size: 0.9rem; }
+
+    /* Résultat */
+    .result { display: none; }
+    .result.visible { display: block; }
+
+    .emotion-badge {
+      font-size: 2.5rem;
+      font-weight: 700;
+      margin-bottom: 4px;
+      text-transform: capitalize;
+    }
+
+    .confidence {
+      color: #888;
+      font-size: 0.9rem;
+      margin-bottom: 24px;
+    }
+
+    /* Barres de probabilité */
+    .bars { text-align: left; }
+
+    .bar-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .bar-label {
+      width: 80px;
+      font-size: 0.8rem;
+      color: #aaa;
+      text-transform: capitalize;
+    }
+
+    .bar-track {
+      flex: 1;
+      height: 8px;
+      background: #2a2a4a;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .bar-fill {
+      height: 100%;
+      border-radius: 4px;
+      background: #7c6ff7;
+      transition: width 0.6s ease;
+    }
+
+    .bar-fill.top { background: #f06292; }
+
+    .bar-value {
+      width: 40px;
+      font-size: 0.8rem;
+      color: #888;
+      text-align: right;
+    }
+
+    /* Emoji par émotion */
+    .emoji { font-size: 3rem; margin-bottom: 8px; }
+
+    .loader {
+      display: none;
+      margin: 20px auto;
+      width: 40px;
+      height: 40px;
+      border: 3px solid #2a2a4a;
+      border-top-color: #7c6ff7;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    .loader.visible { display: block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<h1>🎙️ Emotion Voice Detection</h1>
+<p class="subtitle">Détection d'émotions par la voix — Wav2Vec2 · RAVDESS · 70.83%</p>
+
+<div class="card">
+
+  <!-- Bouton micro -->
+  <button class="mic-btn" id="micBtn" title="Maintenir pour enregistrer">🎤</button>
+  <p class="status" id="status">Clique pour enregistrer (3 secondes)</p>
+
+  <!-- Upload fichier -->
+  <div class="upload-zone">
+    <input type="file" id="fileInput" accept="audio/*">
+    <label for="fileInput">📂 Ou dépose un fichier audio ici (.wav, .mp3)</label>
+  </div>
+
+  <!-- Loader -->
+  <div class="loader" id="loader"></div>
+
+  <!-- Résultat -->
+  <div class="result" id="result">
+    <div class="emoji" id="emoji"></div>
+    <div class="emotion-badge" id="emotionLabel"></div>
+    <div class="confidence" id="confidenceLabel"></div>
+    <div class="bars" id="bars"></div>
+  </div>
+
+</div>
+
+<script>
+  const EMOJIS = {
+    angry: '😡', calm: '😌', disgust: '🤢',
+    fearful: '😨', happy: '😊', neutral: '😐',
+    sad: '😢', surprised: '😲'
+  };
+
+  const COLORS = {
+    angry: '#e53935', calm: '#42a5f5', disgust: '#8d6e63',
+    fearful: '#ab47bc', happy: '#ffca28', neutral: '#78909c',
+    sad: '#5c6bc0', surprised: '#26c6da'
+  };
+
+  const micBtn   = document.getElementById('micBtn');
+  const status   = document.getElementById('status');
+  const loader   = document.getElementById('loader');
+  const result   = document.getElementById('result');
+  const fileInput = document.getElementById('fileInput');
+
+  let mediaRecorder, chunks = [], recording = false;
+
+  // ── Enregistrement micro ──────────────────────────────
+  micBtn.addEventListener('click', async () => {
+    if (recording) return;
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorder = new MediaRecorder(stream);
+      chunks = [];
+
+      mediaRecorder.ondataavailable = e => chunks.push(e.data);
+      mediaRecorder.onstop = async () => {
+        const blob = new Blob(chunks, { type: 'audio/wav' });
+        stream.getTracks().forEach(t => t.stop());
+        await sendAudio(blob);
+      };
+
+      mediaRecorder.start();
+      recording = true;
+      micBtn.classList.add('recording');
+      micBtn.textContent = '⏹️';
+      status.textContent = 'Enregistrement... parle maintenant !';
+
+      // Stop automatique après 4 secondes
+      setTimeout(() => {
+        if (recording) stopRecording();
+      }, 4000);
+
+    } catch (err) {
+      status.textContent = '❌ Micro non accessible';
+    }
+  });
+
+  function stopRecording() {
+    if (!recording) return;
+    mediaRecorder.stop();
+    recording = false;
+    micBtn.classList.remove('recording');
+    micBtn.textContent = '🎤';
+    status.textContent = 'Analyse en cours...';
+  }
+
+  // Stop manuel au deuxième clic
+  micBtn.addEventListener('dblclick', stopRecording);
+
+  // ── Upload fichier ────────────────────────────────────
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    status.textContent = `Analyse de : ${file.name}`;
+    await sendAudio(file);
+  });
+
+  // ── Envoi à l'API ─────────────────────────────────────
+  async function sendAudio(audioBlob) {
+    loader.classList.add('visible');
+    result.classList.remove('visible');
+
+    const formData = new FormData();
+    formData.append('file', audioBlob, 'audio.wav');
+
+    try {
+      const response = await fetch('/predict', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) throw new Error('Erreur API');
+      const data = await response.json();
+      showResult(data);
+      status.textContent = 'Clique pour enregistrer (3 secondes)';
+
+    } catch (err) {
+      status.textContent = '❌ Erreur — vérifie que l\'API tourne';
+    } finally {
+      loader.classList.remove('visible');
+    }
+  }
+
+  // ── Affichage du résultat ─────────────────────────────
+  function showResult(data) {
+    document.getElementById('emoji').textContent      = EMOJIS[data.emotion] || '🎭';
+    document.getElementById('emotionLabel').textContent = data.emotion;
+    document.getElementById('emotionLabel').style.color = COLORS[data.emotion] || '#7c6ff7';
+    document.getElementById('confidenceLabel').textContent = `Confiance : ${data.confidence}%`;
+
+    // Barres de probabilité
+    const barsDiv = document.getElementById('bars');
+    barsDiv.innerHTML = '';
+
+    const sorted = Object.entries(data.probabilities)
+      .sort((a, b) => b[1] - a[1]);
+
+    sorted.forEach(([emo, prob]) => {
+      const isTop = emo === data.emotion;
+      barsDiv.innerHTML += `
+        <div class="bar-row">
+          <span class="bar-label">${emo}</span>
+          <div class="bar-track">
+            <div class="bar-fill ${isTop ? 'top' : ''}"
+                 style="width:${prob}%; background:${isTop ? COLORS[emo] : '#2a2a4a' }">
+            </div>
+          </div>
+          <span class="bar-value">${prob}%</span>
+        </div>`;
+    });
+
+    result.classList.add('visible');
+  }
+</script>
+</body>
+</html>
